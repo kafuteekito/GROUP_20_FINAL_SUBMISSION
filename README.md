@@ -124,8 +124,9 @@ enroll/
 │   ├── img2.jpg
 │   └── img3.jpg
 ├── Myktybek/
-│   ├── photo1.png
-│   └── photo2.jpg
+│   ├── img1.jpg
+│   ├── img2.jpg
+│   └── img3.jpg
 ```
 
 **Recommendations:**
