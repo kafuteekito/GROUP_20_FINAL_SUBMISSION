@@ -9,6 +9,7 @@ from threading import Thread
 import cv2
 import numpy as np
 import tkinter as tk
+from tkinter import ttk
 from PIL import Image, ImageTk
 
 import smtplib
@@ -18,14 +19,12 @@ from retinaface import RetinaFace
 from deepface import DeepFace
 
 
-#Paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_JSON = os.path.join(BASE_DIR, "gallery_db.json")
 UNKNOWN_DIR = os.path.join(BASE_DIR, "unknown_captures")
 ALARM_WAV_PATH = os.path.join(BASE_DIR, "Alarm.wav")
 os.makedirs(UNKNOWN_DIR, exist_ok=True)
 
-#Config
 CAM_INDEX = 0
 FRAME_WIDTH = 960
 PROCESS_EVERY_N_FRAMES = 1
@@ -39,7 +38,6 @@ EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASS", "")
 TO_EMAIL = os.getenv("ALERT_TO_EMAIL", "")
 
 
-#Alerts
 def play_alarm():
     try:
         playsound(ALARM_WAV_PATH)
@@ -74,7 +72,6 @@ def send_email_alert(image_path: str):
         print(f"[EMAIL ERROR] {e}")
 
 
-#Detection
 def clamp_box(x1, y1, x2, y2, w, h):
     x1 = max(0, min(int(x1), w - 1))
     y1 = max(0, min(int(y1), h - 1))
@@ -99,7 +96,6 @@ def detect_faces_retinaface(bgr_img):
     return boxes
 
 
-#Recognition 
 def cosine_distance(a, b):
     a = a.astype(np.float32)
     b = b.astype(np.float32)
@@ -140,18 +136,63 @@ def identify(emb, gallery, threshold):
     return ("Unknown", best_dist) if best_dist > threshold else (best_name, best_dist)
 
 
-class App:
+class HomeSecurityGUI:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Face Security (Basic GUI)")
+        self.root.title("Home Security System")
         self.root.geometry("980x640")
+        self.root.minsize(900, 600)
 
-        self.status = tk.Label(root, text="Starting...", font=("Arial", 14))
-        self.status.pack(pady=8)
+        # Theme (design)
+        self.bg = "#0b1220"
+        self.panel = "#0f1b2d"
+        self.text = "#e6eefc"
+        self.muted = "#9fb0cc"
+        self.good = "#37d67a"
+        self.bad = "#ff4d4d"
+        self.warn = "#ffb020"
 
-        self.video_label = tk.Label(root)
-        self.video_label.pack(fill="both", expand=True)
+        self.root.configure(bg=self.bg)
 
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        style.configure("TLabel", background=self.bg, foreground=self.text, font=("Segoe UI", 11))
+        style.configure("Title.TLabel", background=self.bg, foreground=self.text, font=("Segoe UI", 16, "bold"))
+        style.configure("Muted.TLabel", background=self.bg, foreground=self.muted, font=("Segoe UI", 10))
+
+        # Header
+        header = tk.Frame(root, bg=self.bg)
+        header.pack(fill="x", padx=18, pady=(16, 10))
+        ttk.Label(header, text="Home Security System", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(header, text="Live Camera • RetinaFace + VGG-Face • Alerts", style="Muted.TLabel").pack(anchor="w", pady=(6, 0))
+
+        body = tk.Frame(root, bg=self.bg)
+        body.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+
+        self.card = tk.Frame(body, bg=self.panel, highlightthickness=1, highlightbackground="#1b2a44")
+        self.card.pack(fill="both", expand=True)
+
+        topbar = tk.Frame(self.card, bg=self.panel)
+        topbar.pack(fill="x", padx=14, pady=(12, 10))
+
+        self.status_dot = tk.Canvas(topbar, width=12, height=12, bg=self.panel, highlightthickness=0)
+        self.status_dot.pack(side="left", padx=(0, 8))
+        self.dot_id = self.status_dot.create_oval(2, 2, 10, 10, fill=self.muted, outline="")
+
+        self.status_label = tk.Label(topbar, text="Starting…", bg=self.panel, fg=self.text, font=("Segoe UI", 12, "bold"))
+        self.status_label.pack(side="left")
+
+        self.right_info = tk.Label(topbar, text="", bg=self.panel, fg=self.muted, font=("Segoe UI", 10))
+        self.right_info.pack(side="right")
+
+        self.video_label = tk.Label(self.card, bg="#000000")
+        self.video_label.pack(fill="both", expand=True, padx=14, pady=(0, 14))
+
+        # runtime
         self.running = True
         self.cap = None
 
@@ -170,31 +211,43 @@ class App:
         self.worker = threading.Thread(target=self._worker_loop, daemon=True)
         self.worker.start()
 
-        # UI loop
+        # UI refresh
         self._ui_tick()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-    def _set_status(self, text: str):
-        self.status.config(text=text)
+    def _set_status(self, text: str, state: str = "neutral"):
+        if state == "known":
+            color = self.good
+        elif state == "unknown":
+            color = self.bad
+        elif state == "warning":
+            color = self.warn
+        else:
+            color = self.muted
+
+        self.status_label.config(text=text)
+        self.status_dot.itemconfigure(self.dot_id, fill=color)
 
     def _worker_loop(self):
         # load gallery
         try:
-            self._set_status("Loading gallery_db.json ...")
+            self.root.after(0, lambda: self._set_status("Loading face DB from JSON…", "neutral"))
             self.gallery, self.threshold = load_gallery_json(DB_JSON)
-            self._set_status(f"DB loaded: {len(self.gallery)} people | thr={self.threshold:.2f}")
+            self.root.after(0, lambda: self._set_status(f"DB loaded: {len(self.gallery)} people • threshold={self.threshold:.2f}", "neutral"))
         except Exception as e:
             self.gallery = {}
-            self._set_status(f"DB error: {e}")
+            self.root.after(0, lambda err=str(e): self._set_status(f"DB error: {err}", "unknown"))
 
         # open camera
         self.cap = cv2.VideoCapture(CAM_INDEX)
         if not self.cap.isOpened():
-            self._set_status("Camera error: cannot open webcam")
+            self.root.after(0, lambda: self._set_status("Camera error: cannot open webcam", "unknown"))
             return
 
         frame_i = 0
+        fps_counter = 0
+        fps_t0 = time.time()
 
         while self.running:
             ok, frame = self.cap.read()
@@ -209,36 +262,38 @@ class App:
 
             annotated = frame.copy()
             h, w = frame.shape[:2]
+            frame_i += 1
 
             any_known = False
             any_unknown = False
 
-            frame_i += 1
             if (frame_i % PROCESS_EVERY_N_FRAMES == 0) and self.gallery:
-                boxes = detect_faces_retinaface(frame)
+                try:
+                    boxes = detect_faces_retinaface(frame)
+                    for (x1, y1, x2, y2, _score) in boxes:
+                        x1, y1, x2, y2 = clamp_box(x1, y1, x2, y2, w, h)
+                        face = frame[y1:y2, x1:x2]
+                        if face.size == 0:
+                            continue
 
-                for (x1, y1, x2, y2, _score) in boxes:
-                    x1, y1, x2, y2 = clamp_box(x1, y1, x2, y2, w, h)
-                    face = frame[y1:y2, x1:x2]
-                    if face.size == 0:
-                        continue
+                        try:
+                            emb = embed_face_vgg(face)
+                            name, dist = identify(emb, self.gallery, self.threshold)
+                        except Exception:
+                            name, dist = "Unknown", 1.0
 
-                    try:
-                        emb = embed_face_vgg(face)
-                        name, dist = identify(emb, self.gallery, self.threshold)
-                    except Exception:
-                        name, dist = "Unknown", 1.0
+                        if name == "Unknown":
+                            any_unknown = True
+                            color = (0, 0, 255)
+                        else:
+                            any_known = True
+                            color = (0, 255, 0)
 
-                    if name == "Unknown":
-                        any_unknown = True
-                        color = (0, 0, 255)
-                    else:
-                        any_known = True
-                        color = (0, 255, 0)
-
-                    cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-                    cv2.putText(annotated, f"{name} d={dist:.2f}", (x1, max(0, y1 - 10)),
-                                cv2.FONT_HERSHEY_DUPLEX, 0.7, color, 2)
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                        cv2.putText(annotated, f"{name} d={dist:.2f}", (x1, max(0, y1 - 10)),
+                                    cv2.FONT_HERSHEY_DUPLEX, 0.7, color, 2)
+                except Exception as e:
+                    self.root.after(0, lambda err=str(e): self._set_status(f"Recognition error: {err}", "unknown"))
 
             now = time.time()
             if any_unknown and not any_known:
@@ -248,10 +303,11 @@ class App:
                     self.unknown_alerted = False
 
                 elapsed = now - (self.unknown_start_time or now)
-                cv2.putText(annotated, f"UNKNOWN {elapsed:.1f}s / {UNKNOWN_ALERT_SECONDS}s", (10, 40),
+                cv2.putText(annotated, f"Unknown Face! {elapsed:.1f}s", (10, 40),
                             cv2.FONT_HERSHEY_DUPLEX, 0.9, (0, 0, 255), 2)
+
                 self.root.after(0, lambda e=elapsed: self._set_status(
-                    f"UNKNOWN detected ({e:.1f}s / {UNKNOWN_ALERT_SECONDS}s)"
+                    f"UNKNOWN detected • {e:.1f}s / {UNKNOWN_ALERT_SECONDS}s", "unknown"
                 ))
 
                 if (not self.unknown_alerted) and elapsed >= UNKNOWN_ALERT_SECONDS:
@@ -263,12 +319,26 @@ class App:
                     Thread(target=send_email_alert, args=(filename,), daemon=True).start()
 
                     self.unknown_alerted = True
-                    self.root.after(0, lambda: self._set_status("ALERT sent (UNKNOWN)"))
+                    self.root.after(0, lambda: self._set_status("ALERT sent (UNKNOWN)", "warning"))
             else:
                 self.unknown_detected = False
                 self.unknown_start_time = None
                 self.unknown_alerted = False
-                self.root.after(0, lambda: self._set_status("Live Camera"))
+
+                if not self.gallery:
+                    self.root.after(0, lambda: self._set_status("Live Camera (DB not loaded)", "warning"))
+                else:
+                    self.root.after(0, lambda: self._set_status("Live Camera", "neutral"))
+
+            # FPS info on right
+            fps_counter += 1
+            dt = time.time() - fps_t0
+            if dt >= 1.0:
+                fps = fps_counter / dt
+                fps_counter = 0
+                fps_t0 = time.time()
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                self.root.after(0, lambda f=fps, n=now_str: self.right_info.config(text=f"{n}   •   FPS {f:.1f}"))
 
             # push frame to UI
             try:
@@ -290,7 +360,6 @@ class App:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             img = Image.fromarray(rgb)
 
-            # fit to label size
             lw = max(1, self.video_label.winfo_width())
             lh = max(1, self.video_label.winfo_height())
             iw, ih = img.size
@@ -311,15 +380,23 @@ class App:
 
     def on_close(self):
         self.running = False
+        try:
+            if self.cap is not None:
+                self.cap.release()
+        except Exception:
+            pass
         self.root.destroy()
 
 
 def main():
     root = tk.Tk()
-    App(root)
+    HomeSecurityGUI(root)
     root.mainloop()
 
 
 if __name__ == "__main__":
     main()
+
+
+
 
