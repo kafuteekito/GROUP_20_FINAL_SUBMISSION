@@ -1,6 +1,7 @@
-import os, json, time, datetime, cv2
+import os, json, time, datetime, cv2, smtplib
 import numpy as np
 from threading import Thread
+from email.message import EmailMessage
 from playsound import playsound
 from retinaface import RetinaFace
 from deepface import DeepFace
@@ -14,6 +15,10 @@ MODEL_NAME = "VGG-Face"
 DEFAULT_THRESHOLD = 0.40
 UNKNOWN_ALERT_SECONDS = 10
 
+EMAIL_ADDRESS = os.getenv("ALERT_EMAIL", "")
+EMAIL_PASSWORD = os.getenv("ALERT_EMAIL_PASS", "")
+TO_EMAIL = os.getenv("ALERT_TO_EMAIL", "")
+
 os.makedirs(UNKNOWN_DIR, exist_ok=True)
 
 def play_alarm():
@@ -21,6 +26,32 @@ def play_alarm():
         playsound(ALARM_WAV_PATH)
     except Exception as e:
         print(f"[ALARM ERROR] {e}")
+
+def send_email_alert(image_path: str):
+    if not EMAIL_ADDRESS or not EMAIL_PASSWORD or not TO_EMAIL:
+        print("[EMAIL] Missing env vars ALERT_EMAIL / ALERT_EMAIL_PASS / ALERT_TO_EMAIL")
+        return
+
+    msg = EmailMessage()
+    msg["Subject"] = "Alert! Unknown face detected"
+    msg["From"] = EMAIL_ADDRESS
+    msg["To"] = TO_EMAIL
+    msg.set_content("An unknown person was detected. See attached image.")
+
+    try:
+        with open(image_path, "rb") as f:
+            msg.add_attachment(f.read(), maintype="image", subtype="png", filename=os.path.basename(image_path))
+    except Exception as e:
+        print(f"[EMAIL] attach error: {e}")
+        return
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+        print(f"[EMAIL SENT] {image_path}")
+    except Exception as e:
+        print(f"[EMAIL ERROR] {e}")
 
 def cosine_distance(a, b):
     a = a.astype(np.float32); b = b.astype(np.float32)
@@ -138,13 +169,15 @@ def main():
                 cv2.imwrite(filename, annotated)
 
                 Thread(target=play_alarm, daemon=True).start()
+                Thread(target=send_email_alert, args=(filename,), daemon=True).start()
+
                 unknown_alerted = True
         else:
             unknown_detected = False
             unknown_start_time = None
             unknown_alerted = False
 
-        cv2.imshow("Alarm", annotated)
+        cv2.imshow("Alarm + Email", annotated)
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q") or key == 27:
             break
@@ -154,3 +187,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
