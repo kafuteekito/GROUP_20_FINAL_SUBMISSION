@@ -204,7 +204,7 @@ The newly enrolled person will now be recognized in real time.
 6. Decide **Known / Unknown**
 7. Trigger alerts if needed
 8. Display results in real time
-9. 
+
 ## Output
 
 When an unknown person triggers an alert, the system:
